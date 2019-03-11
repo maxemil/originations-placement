@@ -1,4 +1,5 @@
-#! /usr/bin/env python3
+#! /opt/conda/envs/placement/bin/python3
+
 from Bio import SeqIO, Seq
 from ete3 import ncbi_taxonomy, Tree
 from itertools import combinations
