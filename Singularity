@@ -15,11 +15,15 @@ Bootstrap:docker
 
 %post
     apt-get update
-    apt-get install -y procps libxtst6
+    apt-get install -y procps libxtst6 unzip
     apt-get clean -y
 
     /opt/conda/bin/conda env create -f /environment.yml
     /opt/conda/bin/conda clean -a
+
+    wget https://github.com/amkozlov/raxml-ng/releases/download/0.8.1/raxml-ng_v0.8.1_linux_x86_64.zip
+    unzip raxml-ng_v0.8.1_linux_x86_64.zip
+    mv raxml-ng /usr/local/bin
 
 
 %test
