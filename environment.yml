@@ -8,6 +8,6 @@ dependencies:
   - bioconda::mafft=7.407
   - bioconda::trimal=1.4.1
   - bioconda::epa-ng=0.3.4
-  - bioconda::gappa=0.1.0
+  - bioconda::gappa=0.4.0
   - conda-forge::Biopython=1.72
   - etetoolkit::ete3=3.1.1
