@@ -3,11 +3,15 @@
 params.fasta = ""
 params.reference_alignments = ""
 params.reference_trees = ""
-params.taxid = ""
+params.remove_taxids = ""
 params.og_hierarchy = ""
 params.precompiled_taxa = ""
 
-taxids = Channel.from(file(params.taxid))
+params.placment_dir = "placements"
+params.references_trimmed_dir = "references_trimmed"
+params.queries_dir = "halo_queries"
+
+remove_taxids = Channel.from(file(params.remove_taxids))
 og_hierarchy = Channel.from(file(params.og_hierarchy))
 precompiled_taxa = Channel.from(file(params.precompiled_taxa))
 fasta = Channel.fromPath(params.fasta)
@@ -17,18 +21,26 @@ Channel.fromPath(params.reference_alignments).into{reference_alignments_queries;
 
 references = reference_alignments_queries.map{it -> tuple(it.simpleName, it)}.join(reference_trees)
 
-//
-// process downloadReferences {
+// process filterFastaRecs {
 //   input:
+//   file fasta from fasta
+//   file taxa_selection from select_taxids.first()
 //
 //   output:
-//
-//   tag
+//   file "${fasta.simpleName}.clean.fasta" into cleaned_fasta
 //
 //   script:
 //   """
+//   #! /opt/conda/envs/placement/bin/python3
+//   from Bio import SeqIO
 //
-//
+//   taxa_selection = [t.strip() for t in open("$taxa_selection")]
+//   with open("${fasta.simpleName}.clean.fasta", 'w') as out:
+//       for rec in SeqIO.parse("$fasta", 'fasta'):
+//           if not any([rec.id.startswith(t) for t in taxa_selection]):
+//               print("remove seq {}".format(rec.id))
+//           else:
+//               SeqIO.write(rec, out, 'fasta')
 //   """
 // }
 
@@ -58,16 +70,17 @@ process resolvePolytomies {
   input:
   set val(id), file(refalignment), file(reftree) from references
   each og from unique_og
-  file remove_taxids from taxids.first()
+  file remove_taxids from remove_taxids.first()
   file precompiled_taxa from precompiled_taxa.first()
 
   output:
-  set file("${reftree.simpleName}.trim.tree"), file("${refalignment.simpleName}.trim.aln") into binary_reftrees
-  file "${refalignment.simpleName}.trim.aln" into trim_refaln
-  file "${refalignment.simpleName}.tax.map" into tax_map
+  set file("${reftree.simpleName}.trim.tree"), file("${refalignment.simpleName}.trim.aln") into binary_reftrees optional true
+  file "${refalignment.simpleName}.trim.aln" into trim_refaln optional true
+  file "${refalignment.simpleName}.tax.map" into tax_map optional true
+  file "references_summary.txt" into ref_summary
 
   tag {"${reftree.simpleName}"}
-  publishDir "references_trimmed", mode: 'copy'
+  publishDir "$params.references_trimmed_dir", mode: 'copy'
 
   when:
   "$id" == "${og.simpleName}"
@@ -75,6 +88,7 @@ process resolvePolytomies {
   script:
   template 'prepare_eggnog_ref_OG.py'
 }
+ref_summary.collectFile(name: 'references_summary.txt', storeDir: "$workflow.launchDir")
 
 process addQueries {
   input:
@@ -86,15 +100,16 @@ process addQueries {
 
   tag {"${fasta.baseName}"}
   cpus 4
-  publishDir "halo_queries", mode: 'copy'
+  publishDir "$params.queries_dir", mode: 'copy'
 
   when:
   "${refalignment.simpleName}" == "${fasta.baseName.tokenize('.')[1]}"
 
   script:
   """
-  mafft --add $fasta --thread ${task.cpus} --keeplength $refalignment > ${fasta.baseName}.refquery.aln
-  trimal -in $refalignment -out ${refalignment.simpleName}.phy -phylip
+  trimal -in $refalignment -out ${refalignment.baseName}.90.aln -gt 0.1 -fasta -keepseqs
+  mafft --addfragments $fasta --thread ${task.cpus} --keeplength ${refalignment.baseName}.90.aln > ${fasta.baseName}.refquery.aln
+  trimal -in ${refalignment.baseName}.90.aln -out ${refalignment.simpleName}.phy -phylip
   trimal -in ${fasta.baseName}.refquery.aln -out ${fasta.baseName}.refquery.phy -phylip
   epa-ng --split ${refalignment.simpleName}.phy ${fasta.baseName}.refquery.phy
   mv query.fasta ${fasta.baseName}.aln
@@ -106,15 +121,16 @@ process evaluateTree {
   set file(tree), file(refmsa) from binary_reftrees
 
   output:
-  set file("$tree"), file("${refmsa}.raxml.bestModel"), file("$refmsa") into tree_model
+  set file("$tree"), file("${refmsa.baseName}.90.aln.raxml.bestModel"), file("${refmsa.baseName}.90.aln") into tree_model
 
   tag {"${tree.simpleName}"}
   cpus 4
-  publishDir "references_trimmed", pattern: '*.bestModel', mode: 'copy'
+  publishDir "$params.references_trimmed_dir", pattern: '*.bestModel', mode: 'copy'
 
   script:
   """
-  raxml-ng --evaluate --tree $tree --opt-branches off --msa $refmsa --model LG+F+I --threads ${task.cpus} --force
+  trimal -in $refmsa -out ${refmsa.baseName}.90.aln -gt 0.1 -fasta -keepseqs
+  raxml-ng --evaluate --tree $tree --opt-branches off --msa ${refmsa.baseName}.90.aln --model LG+F+I --threads ${task.cpus} --force
   """
 }
 
@@ -128,7 +144,7 @@ process placeQueries {
 
   tag {"${querymsa.simpleName} - ${tree.simpleName}"}
   cpus 4
-  publishDir "placements", mode: 'copy'
+  publishDir "$params.placment_dir", mode: 'copy'
 
   when:
   "${tree.simpleName}" == "${querymsa.baseName.tokenize('.')[1]}"
@@ -153,7 +169,7 @@ process assignTaxonomy {
   file "${jplace.baseName}.newick" into newick_trees
 
   tag {"${jplace.simpleName} - ${tax_map.simpleName}"}
-  publishDir "placements", mode: 'copy'
+  publishDir "$params.placment_dir", mode: 'copy'
 
   when:
   "${tax_map.simpleName}" == "${jplace.baseName.tokenize('.')[1]}"
@@ -161,8 +177,8 @@ process assignTaxonomy {
   script:
   """
   gappa analyze assign --jplace-path $jplace --taxon-file $tax_map --threads ${task.cpus}
-  mv profile.csv ${jplace.baseName}.csv
-  mv per_pquery_assign ${jplace.baseName}.assign
+  mv profile.tsv ${jplace.baseName}.csv
+  mv per_query.tsv ${jplace.baseName}.assign
   gappa analyze visualize-color --jplace-path $jplace --write-svg-tree --threads ${task.cpus}
   mv tree.svg ${jplace.baseName}.svg
   gappa analyze graft --name-prefix 'Q_' --jplace-path $jplace --threads ${task.cpus}
