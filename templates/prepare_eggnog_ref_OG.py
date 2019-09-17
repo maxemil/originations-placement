@@ -4,6 +4,8 @@ from Bio import SeqIO, Seq
 from ete3 import ncbi_taxonomy, Tree
 from itertools import combinations
 ncbi = ncbi_taxonomy.NCBITaxa()
+from ete3.coretype.tree import TreeError
+from ete3.parser.newick import NewickError
 
 def commonprefix(taxon_paths):
     taxon_path_lists = [t.split('; ') for t in taxon_paths if t is not None]
@@ -68,24 +70,35 @@ def remove_taxids(tree, seqdict, taxid_file):
             keep_leaves.remove(l.name)
             seqdict.pop(l.name)
     tree.prune(keep_leaves, preserve_branch_length=True)
+    if len(seqdict.keys()) < 4:
+        raise TreeError("less than 4 sequences in the alignment, quitting now")
 
 
 def main(tree, aln, treeout, alnout, taxout, taxid_file, precompiled_taxa):
-  tree = Tree(tree, format=0)
-  seqdict = {rec.id: rec for rec in SeqIO.parse(aln, 'fasta')}
-  remove_taxids(tree, seqdict, taxid_file)
-  remove_polytomies(tree, seqdict)
-  precompiled_taxa = {line.split('\\t')[0]:line.strip().split('\\t')[1] for line in open(precompiled_taxa)}
-  with open(taxout, 'w') as out:
-      for rec in seqdict.values():
-          try:
-              lineage = precompiled_taxa[rec.id.split('.')[0]]
-          except:
-              lineage = get_lineage(rec.id.split('.')[0])
-          print("{}\\t{}".format(rec.id, lineage), file=out)
-  with open(alnout, 'w') as out:
-      SeqIO.write(seqdict.values(), out, 'fasta')
-  tree.write(outfile=treeout, format=5)
+    try:
+        tree = Tree(tree, format=0)
+        seqdict = {rec.id: rec for rec in SeqIO.parse(aln, 'fasta')}
+        remove_taxids(tree, seqdict, taxid_file)
+        remove_polytomies(tree, seqdict)
+        precompiled_taxa = {line.split('\\t')[0]:line.strip().split('\\t')[1] for line in open(precompiled_taxa)}
+        with open(taxout, 'w') as out:
+          for rec in seqdict.values():
+              try:
+                  lineage = precompiled_taxa[rec.id.split('.')[0]]
+              except:
+                  lineage = get_lineage(rec.id.split('.')[0])
+              print("{}\\t{}".format(rec.id, lineage), file=out)
+        with open(alnout, 'w') as out:
+            SeqIO.write(seqdict.values(), out, 'fasta')
+        tree.write(outfile=treeout, format=5)
+        with open('references_summary.txt', 'w') as out:
+            print("{}\\tplacement".format(aln.split('.')[0]), file=out)
+    except TreeError:
+        with open('references_summary.txt', 'w') as out:
+            print("{}\\tTreeError".format(aln.split('.')[0]), file=out)
+    except NewickError:
+        with open('references_summary.txt', 'w') as out:
+            print("{}\\tNewickError".format(aln.split('.')[0]), file=out)
 
 if __name__ == '__main__':
   main("$reftree", "$refalignment", "${reftree.simpleName}.trim.tree", "${refalignment.simpleName}.trim.aln", "${refalignment.simpleName}.tax.map", "$remove_taxids", "$precompiled_taxa")
