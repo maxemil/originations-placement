@@ -108,7 +108,7 @@ process addQueries {
   script:
   """
   trimal -in $refalignment -out ${refalignment.baseName}.90.aln -gt 0.1 -fasta -keepseqs
-  mafft --addfragments $fasta --thread ${task.cpus} --keeplength ${refalignment.baseName}.90.aln > ${fasta.baseName}.refquery.aln
+  mafft --anysymbol --addfragments $fasta --thread ${task.cpus} --keeplength ${refalignment.baseName}.90.aln > ${fasta.baseName}.refquery.aln
   trimal -in ${refalignment.baseName}.90.aln -out ${refalignment.simpleName}.phy -phylip
   trimal -in ${fasta.baseName}.refquery.aln -out ${fasta.baseName}.refquery.phy -phylip
   epa-ng --split ${refalignment.simpleName}.phy ${fasta.baseName}.refquery.phy
